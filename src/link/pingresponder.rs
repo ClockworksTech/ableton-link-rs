@@ -139,8 +139,19 @@ impl PingResponder {
                             debug!("pong_payload {:?}", pong_payload);
                         }
 
-                        let pong_message = encode_message(PONG, &pong_payload).unwrap();
-                        unicast_socket.send_to(&pong_message, src).await.unwrap();
+                        let pong_message = match encode_message(PONG, &pong_payload) {
+                            Ok(pong_message) => pong_message,
+                            Err(e) => {
+                                tracing::warn!("failed to encode pong message: {:?}", e);
+                                continue;
+                            }
+                        };
+                        // The peer may have gone away or be unreachable; a
+                        // failed unicast pong must not panic the responder.
+                        if let Err(e) = unicast_socket.send_to(&pong_message, src).await {
+                            tracing::warn!("failed to send pong message to {}: {}", src, e);
+                            continue;
+                        }
                         if !ping_message_received {
                             debug!("sent pong message to {}", src);
                         }

@@ -323,13 +323,31 @@ pub async fn send_message(
     to: SocketAddrV4,
     group_id: SessionGroupId,
 ) {
-    socket.set_broadcast(true).unwrap();
-    socket.set_multicast_ttl_v4(2).unwrap();
-    socket.set_multicast_loop_v4(true).unwrap();
+    if let Err(e) = socket.set_broadcast(true) {
+        warn!("failed to set SO_BROADCAST on multicast socket: {}", e);
+    }
+    if let Err(e) = socket.set_multicast_ttl_v4(2) {
+        warn!("failed to set multicast TTL: {}", e);
+    }
+    if let Err(e) = socket.set_multicast_loop_v4(true) {
+        warn!("failed to set multicast loopback: {}", e);
+    }
 
-    let message = encode_message(from, ttl, message_type, payload, group_id).unwrap();
+    let message = match encode_message(from, ttl, message_type, payload, group_id) {
+        Ok(message) => message,
+        Err(e) => {
+            warn!("failed to encode Link message: {:?}", e);
+            return;
+        }
+    };
 
-    let _sent_bytes = socket.send_to(&message, to).await.unwrap();
+    // A send can fail transiently when the host has no route to the
+    // multicast group (no active interface, VPN-only routing, firewalled
+    // NIC). These show up as HostUnreachable / NetworkUnreachable. Log and
+    // drop the datagram rather than panicking the discovery task.
+    if let Err(e) = socket.send_to(&message, to).await {
+        warn!("failed to send Link message to {}: {}", to, e);
+    }
 }
 
 pub async fn send_peer_state(
