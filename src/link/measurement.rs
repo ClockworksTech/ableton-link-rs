@@ -313,7 +313,7 @@ impl Measurement {
 
         info!("sending initial host time ping {:?}", ht);
 
-        let init_bytes_sent = send_ping(
+        let init_bytes_sent = match send_ping(
             unicast_socket.clone(),
             *state.measurement_endpoint.as_ref().unwrap(),
             &Payload {
@@ -321,7 +321,16 @@ impl Measurement {
             },
         )
         .await
-        .unwrap();
+        {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                // The measurement peer may be unreachable (no route to the
+                // host, interface went down). Skip this ping rather than
+                // panicking the measurement task.
+                tracing::warn!("failed to send initial host time ping: {}", e);
+                0
+            }
+        };
 
         measurement.init_bytes_sent = init_bytes_sent;
 
@@ -412,7 +421,9 @@ impl Measurement {
                             ],
                         };
 
-                        let _ = send_ping(socket.clone(), endpoint, &payload).await.unwrap();
+                        if let Err(e) = send_ping(socket.clone(), endpoint, &payload).await {
+                            tracing::warn!("failed to send measurement ping to {}: {}", endpoint, e);
+                        }
 
                         if ghost_time != Duration::microseconds(0)
                             && prev_host_time != Duration::microseconds(0)
@@ -519,7 +530,8 @@ pub async fn send_ping(
     measurement_endpoint: SocketAddrV4,
     payload: &Payload,
 ) -> io::Result<usize> {
-    let message = encode_message(PING, payload).unwrap();
+    let message = encode_message(PING, payload)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{:?}", e)))?;
     debug!(
         "sending ping message to measurement endpoint {}",
         measurement_endpoint

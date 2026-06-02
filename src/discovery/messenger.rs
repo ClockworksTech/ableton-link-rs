@@ -121,8 +121,23 @@ impl Messenger {
             loop {
                 let mut buf = [0; MAX_MESSAGE_SIZE];
 
-                let (amt, src) = socket.recv_from(&mut buf).await.unwrap();
-                let (header, header_len) = parse_message_header(&buf[..amt]).unwrap();
+                // recv_from can surface a prior failed send's ICMP error
+                // (e.g. HostUnreachable) on some platforms; skip and keep
+                // listening rather than aborting the discovery loop.
+                let (amt, src) = match socket.recv_from(&mut buf).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("discovery recv_from failed: {}", e);
+                        continue;
+                    }
+                };
+                let (header, header_len) = match parse_message_header(&buf[..amt]) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        debug!("discarding malformed message from {}: {:?}", src, e);
+                        continue;
+                    }
+                };
 
                 // TODO figure out how to encode group ID
                 let should_ignore = match peer_state.try_lock() {
