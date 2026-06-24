@@ -175,21 +175,35 @@ impl PeerGateway {
             .await;
 
         tokio::spawn(async move {
-            tokio::signal::ctrl_c().await.unwrap();
-            ctrl_socket.set_broadcast(true).unwrap();
-            ctrl_socket.set_multicast_ttl_v4(2).unwrap();
+            if tokio::signal::ctrl_c().await.is_err() {
+                debug!("Failed to listen for ctrl-c signal");
+                return;
+            }
+
+            if let Err(e) = ctrl_socket.set_broadcast(true) {
+                debug!("Failed to set broadcast on shutdown: {:?}", e);
+            }
+            if let Err(e) = ctrl_socket.set_multicast_ttl_v4(2) {
+                debug!("Failed to set multicast TTL on shutdown: {:?}", e);
+            }
 
             let peer_ident = peer_state
                 .try_lock()
                 .map(|state| state.ident())
                 .unwrap_or_default();
 
-            let message = encode_message(peer_ident, 0, BYEBYE, &Payload::default(), 0).unwrap();
-
-            ctrl_socket
-                .send_to(&message, (MULTICAST_ADDR, LINK_PORT))
-                .await
-                .unwrap();
+            match encode_message(peer_ident, 0, BYEBYE, &Payload::default(), 0) {
+                Ok(message) => {
+                    if let Err(e) =
+                        ctrl_socket.send_to(&message, (MULTICAST_ADDR, LINK_PORT)).await
+                    {
+                        debug!("Failed to send BYEBYE message on shutdown: {:?}", e);
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to encode BYEBYE message on shutdown: {:?}", e);
+                }
+            }
 
             notifier.notify_waiters();
         });
