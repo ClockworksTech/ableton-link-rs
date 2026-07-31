@@ -13,7 +13,11 @@ use crate::{
     },
 };
 
-use super::{clock::Clock, ghostxform::GhostXForm, payload::Payload, sessions::SessionId, Result};
+use super::{
+    clock::Clock, error::Error, ghostxform::GhostXForm, payload::Payload, sessions::SessionId,
+    Result,
+};
+use crate::sync::lock;
 
 pub const MAX_MESSAGE_SIZE: usize = 512;
 pub const PROTOCOL_HEADER_SIZE: usize = 8;
@@ -75,15 +79,18 @@ impl PingResponder {
     }
 
     pub async fn listen(&self, _notifier: Arc<Notify>) {
-        let unicast_socket = self.unicast_socket.as_ref().unwrap().clone();
+        let Some(unicast_socket) = self.unicast_socket.as_ref().map(Arc::clone) else {
+            debug!("ping responder has no unicast socket; not listening");
+            return;
+        };
         let session_id = self.session_id.clone();
         let ghost_x_form = self.ghost_x_form.clone();
         let clock = self.clock;
 
-        info!(
-            "listening for ping messages on {}",
-            unicast_socket.local_addr().unwrap()
-        );
+        match unicast_socket.local_addr() {
+            Ok(addr) => info!("listening for ping messages on {}", addr),
+            Err(e) => info!("listening for ping messages (local addr unavailable: {})", e),
+        }
 
         let mut ping_message_received = false;
 
@@ -97,7 +104,19 @@ impl PingResponder {
                         continue;
                     }
 
-                    let (header, header_len) = parse_message_header(&buf[..amt]).unwrap();
+                    // Anything can send to this port, so a malformed datagram must
+                    // be dropped rather than aborting the process.
+                    let (header, header_len) = match parse_message_header(&buf[..amt]) {
+                        Ok(parsed) => parsed,
+                        Err(e) => {
+                            debug!("ignoring malformed ping header from {}: {}", src, e);
+                            continue;
+                        }
+                    };
+                    if header_len > amt {
+                        debug!("ignoring truncated ping from {}", src);
+                        continue;
+                    }
                     let payload_size = buf[header_len..amt].len();
                     let max_payload_size = 40;
 
@@ -106,7 +125,13 @@ impl PingResponder {
                             info!("received ping message from {}", src);
                         }
 
-                        let payload = parse_payload(&buf[header_len..amt]).unwrap();
+                        let payload = match parse_payload(&buf[header_len..amt]) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                debug!("ignoring malformed ping payload from {}: {}", src, e);
+                                continue;
+                            }
+                        };
 
                         let mut payload_entries = vec![];
                         for entry in payload.entries.into_iter() {
@@ -119,13 +144,10 @@ impl PingResponder {
                         }
 
                         let id = SessionMembership {
-                            session_id: *session_id.try_lock().unwrap(),
+                            session_id: *lock(&session_id),
                         };
                         let current_gt = GhostTime {
-                            time: ghost_x_form
-                                .try_lock()
-                                .unwrap()
-                                .host_to_ghost(clock.micros()),
+                            time: lock(&ghost_x_form).host_to_ghost(clock.micros()),
                         };
 
                         payload_entries.push(PayloadEntry::SessionMembership(id));
@@ -166,8 +188,8 @@ impl PingResponder {
     }
 
     pub async fn update_node_state(&self, session_id: SessionId, x_form: GhostXForm) {
-        *self.session_id.try_lock().unwrap() = session_id;
-        *self.ghost_x_form.try_lock().unwrap() = x_form;
+        *lock(&self.session_id) = session_id;
+        *lock(&self.ghost_x_form) = x_form;
     }
 }
 
@@ -177,7 +199,7 @@ pub fn encode_message(message_type: MessageType, payload: &Payload) -> Result<Ve
     let message_size = PROTOCOL_HEADER_SIZE + MESSAGE_HEADER_SIZE + payload.size() as usize;
 
     if message_size > MAX_MESSAGE_SIZE {
-        panic!("exceeded maximum message size");
+        return Err(Error::Protocol("exceeded maximum message size"));
     }
 
     let mut encoded = encoding::encode_to_vec(&PROTOCOL_HEADER)?;
@@ -191,11 +213,11 @@ pub fn parse_message_header(data: &[u8]) -> Result<(MessageHeader, usize)> {
     let min_message_size = PROTOCOL_HEADER_SIZE + MESSAGE_HEADER_SIZE;
 
     if data.len() < min_message_size {
-        panic!("invalid message size");
+        return Err(Error::Protocol("invalid message size"));
     }
 
     if !data.starts_with(&PROTOCOL_HEADER) {
-        panic!("invalid protocol header");
+        return Err(Error::Protocol("invalid protocol header"));
     }
 
     let (header, consumed) = encoding::decode_from_slice::<MessageHeader>(

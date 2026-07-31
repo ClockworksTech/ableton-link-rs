@@ -10,6 +10,11 @@ pub enum Error {
     Encoding(#[cfg_attr(feature = "std", from)] encoding::EncodeError),
     #[cfg_attr(feature = "std", error("decoding error: {0}"))]
     Decoding(#[cfg_attr(feature = "std", from)] encoding::DecodeError),
+    /// A message that is structurally wrong for the Link wire protocol — too
+    /// short, oversized, or carrying the wrong protocol header. These were
+    /// previously `panic!`s inside functions that already returned `Result`.
+    #[cfg_attr(feature = "std", error("protocol error: {0}"))]
+    Protocol(&'static str),
 }
 
 #[cfg(not(feature = "std"))]
@@ -18,6 +23,7 @@ impl core::fmt::Display for Error {
         match self {
             Error::Encoding(e) => write!(f, "encoding error: {}", e),
             Error::Decoding(e) => write!(f, "decoding error: {}", e),
+            Error::Protocol(msg) => write!(f, "protocol error: {}", msg),
         }
     }
 }
