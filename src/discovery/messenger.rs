@@ -107,7 +107,10 @@ impl Messenger {
     }
 
     pub async fn listen(&self) {
-        let socket = self.interface.as_ref().unwrap().clone();
+        let Some(socket) = self.interface.as_ref().map(Arc::clone) else {
+            debug!("messenger has no bound interface; not listening");
+            return;
+        };
         let peer_state = self.peer_state.clone();
         let ttl = self.ttl;
         let tx_event = self.tx_event.clone();
@@ -220,11 +223,16 @@ impl Messenger {
             // }
         });
 
+        let Some(broadcast_socket) = self.interface.as_ref().map(Arc::clone) else {
+            debug!("messenger has no bound interface; not broadcasting");
+            return;
+        };
+
         broadcast_state(
             self.ttl,
             self.ttl_ratio,
             self.last_broadcast_time.clone(),
-            self.interface.as_ref().unwrap().clone(),
+            broadcast_socket,
             self.peer_state.clone(),
             SocketAddrV4::new(MULTICAST_ADDR, LINK_PORT),
             self.notifier.clone(),
@@ -399,7 +407,15 @@ pub async fn send_peer_state(
 }
 
 pub async fn receive_peer_state(tx: Sender<OnEvent>, header: MessageHeader, buf: &[u8]) {
-    let payload = parse_payload(buf).unwrap();
+    // These bytes came off the discovery multicast socket, so anything on the
+    // network can shape them. Drop unparseable payloads instead of panicking.
+    let payload = match parse_payload(buf) {
+        Ok(payload) => payload,
+        Err(e) => {
+            debug!("ignoring malformed peer state payload: {}", e);
+            return;
+        }
+    };
     let measurement_endpoint = payload.entries.iter().find_map(|e| {
         if let PayloadEntry::MeasurementEndpointV4(me) = e {
             me.endpoint

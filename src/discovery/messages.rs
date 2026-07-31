@@ -3,6 +3,7 @@ use std::mem;
 use crate::encoding::{self, Decode, Encode};
 
 use crate::link::{
+    error::Error,
     node::NodeId,
     payload::{self, Payload},
     Result,
@@ -87,7 +88,7 @@ pub fn encode_message(
     let message_size = PROTOCOL_HEADER_SIZE + MESSAGE_HEADER_SIZE + payload.size() as usize;
 
     if message_size > MAX_MESSAGE_SIZE {
-        panic!("exceeded maximum message size");
+        return Err(Error::Protocol("exceeded maximum message size"));
     }
 
     let mut encoded = encoding::encode_to_vec(&PROTOCOL_HEADER)?;
@@ -123,11 +124,11 @@ pub fn parse_message_header(data: &[u8]) -> Result<(MessageHeader, usize)> {
     let min_message_size = PROTOCOL_HEADER_SIZE + MESSAGE_HEADER_SIZE;
 
     if data.len() < min_message_size {
-        panic!("invalid message size");
+        return Err(Error::Protocol("invalid message size"));
     }
 
     if !data.starts_with(&PROTOCOL_HEADER) {
-        panic!("invalid protocol header");
+        return Err(Error::Protocol("invalid protocol header"));
     }
 
     let (header, consumed) = encoding::decode_from_slice::<MessageHeader>(
@@ -138,7 +139,9 @@ pub fn parse_message_header(data: &[u8]) -> Result<(MessageHeader, usize)> {
 
 pub fn parse_payload(data: &[u8]) -> Result<Payload> {
     let mut payload = Payload::default();
-    payload::decode(&mut payload, data).unwrap();
+    // Propagate rather than unwrap: this parses untrusted bytes straight off the
+    // discovery socket, so a malformed payload must be an error, not a panic.
+    payload::decode(&mut payload, data)?;
 
     Ok(payload)
 }
@@ -220,20 +223,28 @@ mod tests {
         assert_eq!(header.ident, node_id);
     }
 
+    // These used to assert a panic. Malformed input arrives straight off the
+    // network, so it is now reported as an error instead.
     #[test]
-    #[should_panic(expected = "invalid message size")]
     fn parse_message_header_too_short() {
         let data = [0u8; 4]; // Way too short
-        let _ = parse_message_header(&data);
+        let err = parse_message_header(&data).expect_err("short header must be rejected");
+        assert!(
+            matches!(err, Error::Protocol("invalid message size")),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
-    #[should_panic(expected = "invalid protocol header")]
     fn parse_message_header_bad_protocol() {
         // Create data of correct length but wrong protocol header
         let mut data = vec![0u8; PROTOCOL_HEADER_SIZE + MESSAGE_HEADER_SIZE];
         data[0] = 0xFF; // Wrong protocol
-        let _ = parse_message_header(&data);
+        let err = parse_message_header(&data).expect_err("bad protocol must be rejected");
+        assert!(
+            matches!(err, Error::Protocol("invalid protocol header")),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

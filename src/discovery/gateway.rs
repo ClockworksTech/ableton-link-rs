@@ -29,7 +29,11 @@ use crate::{
         payload::Payload,
         state::SessionState,
     },
+    sync::lock,
 };
+
+/// Grace added to a peer's timeout before it is considered gone.
+const TIMEOUT_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
 
 use super::{
     messenger::{send_byebye, Messenger},
@@ -145,18 +149,22 @@ impl PeerGateway {
             .map(|state| state.node_state.node_id)
             .unwrap_or_default();
 
-        info!(
-            "initializing peer gateway {:?} on interface {}",
-            node_id,
-            self.messenger
-                .interface
-                .as_ref()
-                .unwrap()
-                .local_addr()
-                .unwrap()
-        );
+        let Some(ctrl_socket) = self.messenger.interface.as_ref().map(Arc::clone) else {
+            debug!("peer gateway has no bound interface; not initializing");
+            return;
+        };
 
-        let ctrl_socket = self.messenger.interface.as_ref().unwrap().clone();
+        match ctrl_socket.local_addr() {
+            Ok(addr) => info!(
+                "initializing peer gateway {:?} on interface {}",
+                node_id, addr
+            ),
+            Err(e) => info!(
+                "initializing peer gateway {:?} (local addr unavailable: {})",
+                node_id, e
+            ),
+        }
+
         let peer_state = self.peer_state.clone();
 
         // Get self node ID for filtering self-messages
@@ -243,18 +251,12 @@ pub async fn on_peer_state(
     debug!("received peer state from messenger");
 
     let peer_id = msg.node_state.ident();
-    peer_timeouts
-        .try_lock()
-        .unwrap()
-        .retain(|(_, id)| id != &peer_id);
+    lock(&peer_timeouts).retain(|(_, id)| id != &peer_id);
 
-    let new_to = (
-        Instant::now()
-            + Duration::seconds(std::cmp::min(msg.ttl as i64, 3))
-                .to_std()
-                .unwrap(), // Cap timeout at 3 seconds max
-        peer_id,
-    );
+    // TTL is capped at 3 seconds, so this conversion cannot fail; fall back
+    // rather than unwrapping a negative/absurd value into a panic.
+    let ttl = std::time::Duration::from_secs(msg.ttl.min(3) as u64);
+    let new_to = (Instant::now() + ttl, peer_id);
 
     debug!(
         "updating peer timeout status for peer {} with TTL {} seconds (capped at 3)",
@@ -374,7 +376,7 @@ pub async fn schedule_next_pruning(
     let (timeout_instant, peer_id) = {
         if let Ok(timeouts) = pt.try_lock() {
             if let Some((timeout, peer_id)) = timeouts.first().copied() {
-                let timeout_instant = timeout + Duration::milliseconds(100).to_std().unwrap();
+                let timeout_instant = timeout + TIMEOUT_GRACE;
                 (timeout_instant, peer_id)
             } else {
                 return; // No timeouts available
