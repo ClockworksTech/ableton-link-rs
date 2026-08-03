@@ -148,7 +148,9 @@ impl Decode for u64 {
         if bytes.len() < 8 {
             return Err(DecodeError::UnexpectedEnd);
         }
-        let arr: [u8; 8] = bytes[..8].try_into().unwrap();
+        let arr: [u8; 8] = bytes[..8]
+            .try_into()
+            .map_err(|_| DecodeError::UnexpectedEnd)?;
         Ok((u64::from_be_bytes(arr), 8))
     }
 }
@@ -167,7 +169,9 @@ impl Decode for i64 {
         if bytes.len() < 8 {
             return Err(DecodeError::UnexpectedEnd);
         }
-        let arr: [u8; 8] = bytes[..8].try_into().unwrap();
+        let arr: [u8; 8] = bytes[..8]
+            .try_into()
+            .map_err(|_| DecodeError::UnexpectedEnd)?;
         Ok((i64::from_be_bytes(arr), 8))
     }
 }
@@ -186,7 +190,9 @@ impl Decode for f64 {
         if bytes.len() < 8 {
             return Err(DecodeError::UnexpectedEnd);
         }
-        let arr: [u8; 8] = bytes[..8].try_into().unwrap();
+        let arr: [u8; 8] = bytes[..8]
+            .try_into()
+            .map_err(|_| DecodeError::UnexpectedEnd)?;
         Ok((f64::from_be_bytes(arr), 8))
     }
 }

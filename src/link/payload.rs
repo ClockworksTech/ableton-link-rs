@@ -97,13 +97,19 @@ pub fn decode(payload: &mut Payload, data: &[u8]) -> Result<()> {
         return Ok(());
     }
 
+    // This decodes untrusted bytes straight off the network, so a bad header must
+    // surface as an error rather than a panic.
     let (payload_entry_header, _) =
-        encoding::decode_from_slice::<PayloadEntryHeader>(&data[..PAYLOAD_ENTRY_HEADER_SIZE])
-            .unwrap();
+        encoding::decode_from_slice::<PayloadEntryHeader>(&data[..PAYLOAD_ENTRY_HEADER_SIZE])?;
 
     match payload_entry_header.key {
         HOST_TIME_HEADER_KEY => {
             let decode_len = PAYLOAD_ENTRY_HEADER_SIZE + HOST_TIME_SIZE as usize;
+            // A truncated entry would make the slices below panic; treat it
+            // as end-of-payload instead.
+            if decode_len > data.len() {
+                return Ok(());
+            }
             let (entry, _) = encoding::decode_from_slice::<HostTime>(
                 &data[PAYLOAD_ENTRY_HEADER_SIZE..decode_len],
             )?;
@@ -115,10 +121,14 @@ pub fn decode(payload: &mut Payload, data: &[u8]) -> Result<()> {
         }
         TIMELINE_HEADER_KEY => {
             let decode_len = PAYLOAD_ENTRY_HEADER_SIZE + TIMELINE_SIZE as usize;
+            // A truncated entry would make the slices below panic; treat it
+            // as end-of-payload instead.
+            if decode_len > data.len() {
+                return Ok(());
+            }
             let (entry, _) = encoding::decode_from_slice::<Timeline>(
                 &data[PAYLOAD_ENTRY_HEADER_SIZE..decode_len],
-            )
-            .unwrap();
+            )?;
 
             debug!("decoded payload entry {:?}", entry);
 
@@ -127,6 +137,11 @@ pub fn decode(payload: &mut Payload, data: &[u8]) -> Result<()> {
         }
         SESSION_MEMBERSHIP_HEADER_KEY => {
             let decode_len = PAYLOAD_ENTRY_HEADER_SIZE + SESSION_MEMBERSHIP_SIZE as usize;
+            // A truncated entry would make the slices below panic; treat it
+            // as end-of-payload instead.
+            if decode_len > data.len() {
+                return Ok(());
+            }
             let (entry, _) = encoding::decode_from_slice::<SessionMembership>(
                 &data[PAYLOAD_ENTRY_HEADER_SIZE..decode_len],
             )?;
@@ -138,6 +153,11 @@ pub fn decode(payload: &mut Payload, data: &[u8]) -> Result<()> {
         }
         START_STOP_STATE_HEADER_KEY => {
             let decode_len = PAYLOAD_ENTRY_HEADER_SIZE + START_STOP_STATE_SIZE as usize;
+            // A truncated entry would make the slices below panic; treat it
+            // as end-of-payload instead.
+            if decode_len > data.len() {
+                return Ok(());
+            }
             let (entry, _) = encoding::decode_from_slice::<StartStopState>(
                 &data[PAYLOAD_ENTRY_HEADER_SIZE..decode_len],
             )?;
@@ -149,6 +169,11 @@ pub fn decode(payload: &mut Payload, data: &[u8]) -> Result<()> {
         }
         MEASUREMENT_ENDPOINT_V4_HEADER_KEY => {
             let decode_len = PAYLOAD_ENTRY_HEADER_SIZE + MEASUREMENT_ENDPOINT_V4_SIZE as usize;
+            // A truncated entry would make the slices below panic; treat it
+            // as end-of-payload instead.
+            if decode_len > data.len() {
+                return Ok(());
+            }
             let (entry, _) = encoding::decode_from_slice::<MeasurementEndpointV4>(
                 &data[PAYLOAD_ENTRY_HEADER_SIZE..decode_len],
             )?;
@@ -162,6 +187,11 @@ pub fn decode(payload: &mut Payload, data: &[u8]) -> Result<()> {
         }
         GHOST_TIME_HEADER_KEY => {
             let decode_len = PAYLOAD_ENTRY_HEADER_SIZE + GHOST_TIME_SIZE as usize;
+            // A truncated entry would make the slices below panic; treat it
+            // as end-of-payload instead.
+            if decode_len > data.len() {
+                return Ok(());
+            }
             let (entry, _) = encoding::decode_from_slice::<GhostTime>(
                 &data[PAYLOAD_ENTRY_HEADER_SIZE..decode_len],
             )?;
@@ -173,6 +203,11 @@ pub fn decode(payload: &mut Payload, data: &[u8]) -> Result<()> {
         }
         PREV_GHOST_TIME_HEADER_KEY => {
             let decode_len = PAYLOAD_ENTRY_HEADER_SIZE + PREV_GHOST_TIME_SIZE as usize;
+            // A truncated entry would make the slices below panic; treat it
+            // as end-of-payload instead.
+            if decode_len > data.len() {
+                return Ok(());
+            }
             let (entry, _) = encoding::decode_from_slice::<PrevGhostTime>(
                 &data[PAYLOAD_ENTRY_HEADER_SIZE..decode_len],
             )?;
@@ -246,7 +281,7 @@ impl HostTime {
     pub fn encode(&self) -> Result<Vec<u8>> {
         let mut encoded = HOST_TIME_HEADER.encode()?;
         encoded.append(&mut encoding::encode_to_vec(
-            &self.time.num_microseconds().unwrap(),
+            &self.time.num_microseconds().unwrap_or(0),
         )?);
         Ok(encoded)
     }
@@ -285,7 +320,7 @@ impl GhostTime {
     pub fn encode(&self) -> Result<Vec<u8>> {
         let mut encoded = GHOST_TIME_HEADER.encode()?;
         encoded.append(&mut encoding::encode_to_vec(
-            &self.time.num_microseconds().unwrap(),
+            &self.time.num_microseconds().unwrap_or(0),
         )?);
         Ok(encoded)
     }
@@ -316,7 +351,7 @@ impl PrevGhostTime {
     pub fn encode(&self) -> Result<Vec<u8>> {
         let mut encoded = PREV_GHOST_TIME_HEADER.encode()?;
         encoded.append(&mut encoding::encode_to_vec(
-            &self.time.num_microseconds().unwrap(),
+            &self.time.num_microseconds().unwrap_or(0),
         )?);
         Ok(encoded)
     }

@@ -119,6 +119,9 @@ pub struct Sessions {
     pub has_joined: Arc<Mutex<bool>>,
 }
 
+/// How often a session is re-measured once it has been scheduled.
+const REMEASURE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
 impl Sessions {
     pub fn new(
         init: Session,
@@ -518,7 +521,7 @@ pub async fn schedule_remeasurement(
 ) {
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::microseconds(30000000).to_std().unwrap()).await;
+            tokio::time::sleep(REMEASURE_INTERVAL).await;
             launch_session_measurement(peers.clone(), tx_measure_peer.clone(), session.clone())
                 .await;
         }
@@ -529,9 +532,7 @@ pub fn session_peers(
     peers: Arc<Mutex<Vec<ControllerPeer>>>,
     session_id: SessionId,
 ) -> Vec<ControllerPeer> {
-    let mut peers = peers
-        .try_lock()
-        .unwrap()
+    let mut peers = lock(&peers)
         .iter()
         .filter(|p| p.peer_state.session_id() == session_id)
         .cloned()

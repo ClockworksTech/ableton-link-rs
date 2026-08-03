@@ -20,14 +20,19 @@ impl Default for GhostXForm {
 impl GhostXForm {
     pub fn host_to_ghost(&self, host_time: Duration) -> Duration {
         Duration::microseconds(
-            (self.slope * host_time.num_microseconds().unwrap() as f64).round() as i64,
+            (self.slope * host_time.num_microseconds().unwrap_or(0) as f64).round() as i64,
         ) + self.intercept
     }
 
     pub fn ghost_to_host(&self, ghost_time: Duration) -> Duration {
+        // A zero slope would divide to infinity and then saturate on the cast;
+        // a default transform has slope 1.0, so treat 0 as "no mapping".
+        if self.slope == 0.0 {
+            return Duration::zero();
+        }
         Duration::microseconds(
-            ((ghost_time - self.intercept).num_microseconds().unwrap() as f64 / self.slope).round()
-                as i64,
+            ((ghost_time - self.intercept).num_microseconds().unwrap_or(0) as f64 / self.slope)
+                .round() as i64,
         )
     }
 }

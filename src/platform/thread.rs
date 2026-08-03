@@ -2,6 +2,7 @@
 // Based on Ableton Link's thread optimizations
 // Now using 100% safe Rust implementations!
 
+use std::io;
 use std::thread::{self, JoinHandle};
 
 pub struct ThreadFactory;
@@ -10,7 +11,10 @@ impl ThreadFactory {
     /// Create a new thread with platform-specific optimizations
     /// Sets thread name for debugging purposes
     /// This is a completely safe implementation using only std::thread::Builder
-    pub fn make_thread<F, T>(name: String, f: F) -> JoinHandle<T>
+    ///
+    /// Returns the spawn error rather than panicking: the OS can refuse a thread
+    /// under resource pressure, and a panic here would abort the host process.
+    pub fn make_thread<F, T>(name: String, f: F) -> io::Result<JoinHandle<T>>
     where
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
@@ -19,10 +23,7 @@ impl ThreadFactory {
         // std::thread::Builder already sets the thread name safely
         // We don't need platform-specific naming APIs since Rust's thread names
         // are visible in debuggers and profilers
-        thread::Builder::new()
-            .name(name)
-            .spawn(f)
-            .expect("Failed to spawn thread")
+        thread::Builder::new().name(name).spawn(f)
     }
 }
 
@@ -39,7 +40,8 @@ mod tests {
         let handle = ThreadFactory::make_thread("test_thread".to_string(), move || {
             *result_clone.lock().unwrap() = Some(42);
             42
-        });
+        })
+        .expect("spawn");
 
         let thread_result = handle.join().unwrap();
         assert_eq!(thread_result, 42);
@@ -51,7 +53,7 @@ mod tests {
         let handle = ThreadFactory::make_thread("named_thread".to_string(), || {
             // Just verify the thread was created successfully
             std::thread::current().name().map(|s| s.to_string())
-        });
+        }).expect("spawn");
 
         let name = handle.join().unwrap();
         // Note: thread name might be truncated on some platforms
@@ -68,7 +70,7 @@ mod tests {
         let handle = ThreadFactory::make_thread(special_name, || {
             // Thread should be created successfully even with special characters
             42
-        });
+        }).expect("spawn");
 
         let result = handle.join().unwrap();
         assert_eq!(result, 42);
@@ -88,9 +90,14 @@ mod tests {
         std::panic::set_hook(prev_hook);
 
         match handle_result {
-            Ok(handle) => {
+            // Now that spawn errors are returned rather than panicking, a null
+            // byte in the name can surface either way.
+            Ok(Ok(handle)) => {
                 let result = handle.join().unwrap();
                 assert_eq!(result, 100);
+            }
+            Ok(Err(_)) => {
+                // Spawn refused the name — reported as an error, as intended.
             }
             Err(_) => {
                 // Panic is expected — null bytes are rejected by std::thread::Builder
@@ -109,7 +116,8 @@ mod tests {
             let handle = ThreadFactory::make_thread(format!("worker_thread_{}", i), move || {
                 results_clone.lock().unwrap().push(i);
                 i
-            });
+            })
+            .expect("spawn");
             handles.push(handle);
         }
 
@@ -135,7 +143,7 @@ mod tests {
         let handle = ThreadFactory::make_thread(expected_name, move || {
             // Get the current thread's name
             std::thread::current().name().map(|s| s.to_string())
-        });
+        }).expect("spawn");
 
         let actual_name = handle.join().unwrap();
 

@@ -38,7 +38,7 @@ impl Encode for StartStopState {
     fn encode_to(&self, out: &mut Vec<u8>) {
         self.is_playing.encode_to(out);
         self.beats.encode_to(out);
-        self.timestamp.num_microseconds().unwrap().encode_to(out);
+        self.timestamp.num_microseconds().unwrap_or(0).encode_to(out);
     }
     fn encoded_size(&self) -> usize {
         self.is_playing.encoded_size() + self.beats.encoded_size() + 8

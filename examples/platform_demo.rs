@@ -42,13 +42,16 @@ fn main() {
 
     // Test thread factory
     println!("\n3. Thread Factory Test:");
-    let handle = platform::ThreadFactory::make_thread("demo_thread".to_string(), || {
+    match platform::ThreadFactory::make_thread("demo_thread".to_string(), || {
         println!("   Hello from optimized thread!");
         42
-    });
-
-    let result = handle.join().unwrap();
-    println!("   Thread returned: {}", result);
+    }) {
+        Ok(handle) => match handle.join() {
+            Ok(result) => println!("   Thread returned: {}", result),
+            Err(_) => println!("   Thread panicked"),
+        },
+        Err(e) => println!("   Could not spawn thread: {}", e),
+    }
 
     // Show current platform
     println!("\n4. Platform Detection:");

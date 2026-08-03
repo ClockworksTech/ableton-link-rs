@@ -286,7 +286,7 @@ impl Controller {
                                     "controller received start stop state. isPlaying: {}, beats: {}, time: {} for session: {}",
                                     peer_start_stop_state.is_playing,
                                     peer_start_stop_state.beats.floating(),
-                                    peer_start_stop_state.timestamp.num_microseconds().unwrap(),
+                                    peer_start_stop_state.timestamp.num_microseconds().unwrap_or(0),
                                     peer_session,
                                 );
 

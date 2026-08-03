@@ -55,7 +55,11 @@ impl NodeId {
     }
 
     pub fn random<R: Rng>(mut rng: R) -> Self {
-        let dist = Uniform::new(33u8, 127u8).unwrap();
+        // The range is a non-empty constant, so this cannot actually fail — but
+        // build it fallibly anyway, since a panic here would abort the host.
+        let Ok(dist) = Uniform::new(33u8, 127u8) else {
+            return NodeId([33u8; 8]);
+        };
         let arr: [u8; 8] = core::array::from_fn(|_| dist.sample(&mut rng));
         NodeId(arr)
     }

@@ -24,8 +24,16 @@ impl Display for Tempo {
 
 impl From<Duration> for Tempo {
     fn from(value: Duration) -> Self {
+        // `num_microseconds` only returns None on an absurd (>292k year)
+        // duration. Guard the divisor as well so a zero-length beat yields 0 bpm
+        // instead of an infinity that would poison every later calculation.
+        let micros = value.num_microseconds().unwrap_or(0);
         Tempo {
-            value: 60.0 * 1e6 / value.num_microseconds().unwrap() as f64,
+            value: if micros == 0 {
+                0.0
+            } else {
+                60.0 * 1e6 / micros as f64
+            },
         }
     }
 }
@@ -44,16 +52,17 @@ impl Tempo {
     }
 
     pub fn micros_to_beats(&self, micros: Duration) -> Beats {
-        Beats::new(
-            micros.num_microseconds().unwrap() as f64
-                / self.micros_per_beat().num_microseconds().unwrap() as f64,
-        )
+        let per_beat = self.micros_per_beat().num_microseconds().unwrap_or(0);
+        if per_beat == 0 {
+            return Beats::new(0.0);
+        }
+        Beats::new(micros.num_microseconds().unwrap_or(0) as f64 / per_beat as f64)
     }
 
     pub fn beats_to_micros(&self, beats: Beats) -> Duration {
         Duration::microseconds(
-            (beats.floating() * self.micros_per_beat().num_microseconds().unwrap() as f64).round()
-                as i64,
+            (beats.floating() * self.micros_per_beat().num_microseconds().unwrap_or(0) as f64)
+                .round() as i64,
         )
     }
 }
@@ -62,7 +71,7 @@ impl crate::encoding::Encode for Tempo {
     fn encode_to(&self, out: &mut alloc::vec::Vec<u8>) {
         self.micros_per_beat()
             .num_microseconds()
-            .unwrap()
+            .unwrap_or(0)
             .encode_to(out);
     }
     fn encoded_size(&self) -> usize {

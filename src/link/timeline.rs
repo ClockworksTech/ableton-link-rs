@@ -57,7 +57,7 @@ impl Encode for Timeline {
     fn encode_to(&self, out: &mut Vec<u8>) {
         self.tempo.encode_to(out);
         self.beat_origin.encode_to(out);
-        self.time_origin.num_microseconds().unwrap().encode_to(out);
+        self.time_origin.num_microseconds().unwrap_or(0).encode_to(out);
     }
     fn encoded_size(&self) -> usize {
         self.tempo.encoded_size() + self.beat_origin.encoded_size() + 8
